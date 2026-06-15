@@ -1,0 +1,14 @@
+group,parent,value,sort_order
+main_category,,面接,10
+main_category,,Webテスト,20
+main_category,,ES,30
+main_category,,GD,40
+main_category,,インターン,50
+main_category,,説明会,60
+sub_category,面接,1次,10
+sub_category,面接,2次,20
+sub_category,面接,最終,90
+application_source,,OfferBox,10
+application_source,,Wantedly,20
+application_source,,マイナビ,30
+application_source,,リクナビ,40
