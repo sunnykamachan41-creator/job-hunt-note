@@ -1,0 +1,5 @@
+event_id,company_id,event_type,title,start_datetime,end_datetime,is_period,period_end_date,status,person,meeting_url,memo,google_calendar_created,google_calendar_event_ids,created_at,updated_at
+evt001,cmp001,ES提出,,2026-06-10 23:59,,,,通過,,,,,,,
+evt002,cmp001,Webテスト,,2026-06-14 18:00,,,,通過,,,,,,,
+evt003,cmp001,一次面接,,2026-06-20 14:00,,,,予定,,,,,,,
+evt004,cmp002,GD,,2026-06-18 10:00,,,,予定,,,,,,,
