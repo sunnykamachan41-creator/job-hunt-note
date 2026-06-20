@@ -1,5 +1,5 @@
-event_id,company_id,event_type,title,start_datetime,end_datetime,is_period,period_end_date,status,person,meeting_url,memo,google_calendar_created,google_calendar_event_ids,google_event_id,created_at,updated_at
-evt001,cmp001,ES提出,,2026-06-10 23:59,,,false,,通過,,,,false,,,,
-evt002,cmp001,Webテスト,,2026-06-14 18:00,,,false,,通過,,,,false,,,,
-evt003,cmp001,一次面接,,2026-06-20 14:00,2026-06-20 15:00,false,,予定,,,,false,,,,
-evt004,cmp002,GD,,2026-06-18 10:00,,,false,,予定,,,,false,,,,
+event_id,company_id,selection_type,event_type,title,start_datetime,end_datetime,timezone,is_period,period_end_date,status,person,meeting_url,memo,sync_to_calendar,google_calendar_event_id,calendar_last_synced_at,created_at,updated_at
+evt001,cmp001,本選考,ES提出,,2026/6/10 23:59,,Asia/Tokyo,false,,通過,,,,false,,,,
+evt002,cmp001,本選考,Webテスト,,2026/6/14 18:00,,Asia/Tokyo,false,,通過,,,,false,,,,
+evt003,cmp001,本選考,一次面接,,2026/6/20 14:00,,Asia/Tokyo,false,,予定,,,,true,,,,
+evt004,cmp002,本選考,GD,,2026/6/18 10:00,,Asia/Tokyo,false,,予定,,,,true,,,,

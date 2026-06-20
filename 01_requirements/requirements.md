@@ -51,7 +51,8 @@
 - Google Sheets APIの認証はサービスアカウント方式を採用する。
 - OAuthは初期実装では使用しない。
 - 将来的には各ユーザーが自身のGoogle Sheetsを紐付けられる構造を想定する。
-- タイムゾーンは `Asia/Tokyo` 固定とする。
+- タイムゾーンはデフォルト `Asia/Tokyo` とし、イベントごとに変更可能とする。
+- UI表示用タイムゾーンと予定入力用タイムゾーンは settings で管理する。
 
 ## 4. データベース設計（Google Sheets）
 
@@ -67,15 +68,15 @@
 | --- | --- | --- |
 | company_id | string | UUID、一意ID |
 | company_name | string | 企業名 |
-| category | string | インターン / 本選考 / その他 |
 | industry | string | 業界（任意） |
 | status | string | 選考中 / 落選 / 辞退 / 保留 / 内定 |
-| recruitment_source | string | 応募媒体（任意） |
-| order_index | number | タイムライン表示順 |
+| recruitment_source | string | 応募媒体とは別に保持する流入元メモ（任意） |
+| order_index | number | 将来の表示順調整用。通常UIでは編集しない |
 | mypage_url | string | マイページURL（任意） |
 | memo | string | 企業メモ |
 | created_at | datetime | 登録日時 |
 | updated_at | datetime | 更新日時 |
+| application_source | string | 応募媒体（任意） |
 
 ### events シート
 
@@ -83,19 +84,21 @@
 | --- | --- | --- |
 | event_id | string | UUID、一意ID |
 | company_id | string | companiesとの紐付け |
+| selection_type | string | 本選考 / インターン。企業ではなくイベントごとに保持する |
 | event_type | string | ES / Webテスト / 適性検査 / 面接 / GD / インターン / 説明会 / その他 |
 | title | string | 表示名（任意） |
 | start_datetime | datetime | 開始日時 |
 | end_datetime | datetime | 終了日時。締切系は空でも可 |
+| timezone | string | イベント入力時のタイムゾーン。未設定時は予定入力用デフォルトを使用 |
 | is_period | boolean | 期間イベントか |
 | period_end_date | date | 期間イベント用終了日 |
 | status | string | 予定 / 通過 / 落選 / 辞退 / 保留 / 内定 |
 | person | string | 担当者名 |
 | meeting_url | string | Zoom / Meet等URL |
 | memo | string | イベントメモ |
-| google_calendar_created | boolean | Googleカレンダー登録済フラグ |
-| google_calendar_event_ids | string | 登録したGoogleカレンダーイベントID（カンマ区切り等） |
-| google_event_id | string | 単一イベント用GoogleカレンダーイベントID（任意） |
+| sync_to_calendar | boolean | Google Calendarへ同期するか |
+| google_calendar_event_id | string | Google CalendarイベントID |
+| calendar_last_synced_at | datetime | Google Calendarへ最後に同期した日時 |
 | created_at | datetime | 登録日時 |
 | updated_at | datetime | 更新日時 |
 
@@ -103,10 +106,13 @@
 
 | カラム名 | 型 | 説明 |
 | --- | --- | --- |
+| setting_id | string | UUID、一意ID |
 | group | string | 設定グループ |
 | parent | string | 親カテゴリ（任意） |
 | value | string | 表示値 |
 | sort_order | number | 表示順 |
+| created_at | datetime | 登録日時 |
+| updated_at | datetime | 更新日時 |
 
 主用途:
 
@@ -117,13 +123,13 @@
 例:
 
 ```csv
-group,parent,value,sort_order
-main_category,,面接,10
-main_category,,Webテスト,20
-sub_category,面接,1次,10
-sub_category,面接,最終,90
-application_source,,OfferBox,10
-application_source,,Wantedly,20
+setting_id,group,parent,value,sort_order,created_at,updated_at
+uuid,main_category,,面接,10,,
+uuid,main_category,,Webテスト,20,,
+uuid,sub_category,面接,1次,10,,
+uuid,sub_category,面接,最終,90,,
+uuid,application_source,,OfferBox,10,,
+uuid,application_source,,Wantedly,20,,
 ```
 
 将来的には以下も追加可能:

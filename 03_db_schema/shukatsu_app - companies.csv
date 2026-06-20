@@ -1,5 +1,5 @@
-company_id,company_name,category,industry,status,recruitment_source,order_index,mypage_url,memo,created_at,updated_at
-cmp001,ワークスアプリケーションズ,インターン,IT,選考中,OfferBox,10,,,,
-cmp002,PLAN-B,インターン,広告,選考中,Wantedly,20,,,,
-cmp003,アジアクエスト,インターン,IT,選考中,,30,,,,
-cmp004,カオナビ,インターン,HRTech,落選,,40,,,,
+company_id,company_name,industry,status,recruitment_source,order_index,mypage_url,memo,created_at,updated_at,application_source
+cmp001,ワークスアプリケーションズ,IT,選考中,,10,,,,,
+cmp002,PLAN-B,広告,選考中,,20,,,,,
+cmp003,アジアクエスト,IT,選考中,,30,,,,,
+cmp004,カオナビ,HRTech,選考中,,40,,,2026/6/16 20:10,,
