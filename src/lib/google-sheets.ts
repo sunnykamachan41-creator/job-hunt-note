@@ -147,6 +147,18 @@ async function assertSheetHeader(sheets: Awaited<ReturnType<typeof getSheetsClie
   });
   const actual = (response.data.values?.[0] ?? []).map((value: unknown) => String(value).trim());
   const expected = expectedColumns(sheetKey);
+
+  if (canAppendEventColumns(sheetKey, actual, expected)) {
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${sheetKey}!1:1`,
+      valueInputOption: "RAW",
+      requestBody: { values: [expected] }
+    });
+    headerCache.set(sheetKey, Date.now() + headerCacheTtlMs);
+    return;
+  }
+
   const problems: string[] = [];
   const maxLength = Math.max(actual.length, expected.length);
 
@@ -175,6 +187,18 @@ async function assertSheetHeader(sheets: Awaited<ReturnType<typeof getSheetsClie
   }
 
   headerCache.set(sheetKey, Date.now() + headerCacheTtlMs);
+}
+
+function canAppendEventColumns(sheetKey: SheetKey, actual: string[], expected: string[]) {
+  if (sheetKey !== "events" || actual.length >= expected.length) {
+    return false;
+  }
+
+  const addedColumns = expected.slice(actual.length);
+  const allowedAppendedColumns = new Set(["event_series_id", "series_day_index", "time_mode"]);
+
+  return actual.every((column, index) => column === expected[index]) &&
+    addedColumns.every((column) => allowedAppendedColumns.has(column));
 }
 
 export async function listSheetRows<T>(sheetKey: SheetKey, options: ListOptions = {}): Promise<SheetRow<T>[]> {

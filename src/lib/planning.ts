@@ -150,6 +150,10 @@ export function eventScheduleLabel(event: JobEvent, displayTimeZone = event.time
     return `${formatMonthDay(date)} - ${formatMonthDay(parseDate(event.period_end_date) ?? date)}`;
   }
 
+  if (isDateOnlyEvent(event)) {
+    return formatMonthDay(date);
+  }
+
   return time ? `${formatMonthDay(date)} ${time}` : formatMonthDay(date);
 }
 
@@ -161,6 +165,10 @@ export function eventScheduleRangeLabel(event: JobEvent, displayTimeZone = event
   }
 
   if (parseBoolean(event.is_period) && event.period_end_date) {
+    return eventScheduleLabel(event, displayTimeZone);
+  }
+
+  if (isDateOnlyEvent(event)) {
     return eventScheduleLabel(event, displayTimeZone);
   }
 
@@ -193,6 +201,12 @@ export function eventTimeLabel(event: JobEvent, displayTimeZone = event.timezone
   return formatTime(date) || "終日";
 }
 
+export function isDateOnlyEvent(event: JobEvent) {
+  if (event.time_mode === "date_only") return true;
+  if (event.time_mode === "datetime") return false;
+  return /(?:T|\s)00:00$/.test(event.start_datetime) && !event.end_datetime;
+}
+
 export function relativeDayLabel(date: Date, now = new Date()) {
   const diff = dayDiff(startOfDay(now), startOfDay(date));
 
@@ -213,54 +227,60 @@ export function relativeDayLabel(date: Date, now = new Date()) {
 
 export function statusTone(status: string) {
   if (status === "予定" || status === "選考中") return "bg-blue-100 text-blue-700";
+  if (status === "検討中") return "bg-slate-100 text-slate-700";
+  if (status === "結果待ち") return "bg-yellow-100 text-yellow-700";
   if (status === "通過") return "bg-green-100 text-green-700";
   if (status === "落選") return "bg-red-100 text-red-600";
   if (status === "辞退") return "bg-amber-100 text-amber-700";
-  if (status === "保留") return "bg-purple-100 text-purple-700";
+  if (status === "保留") return "bg-slate-100 text-slate-700";
   if (status === "内定") return "bg-violet-100 text-violet-700";
   return "bg-slate-100 text-slate-600";
 }
 
+export type EventColorGroup = "submission" | "test" | "participation" | "selection" | "other";
+
+/** Maps both the current default choices and older Sheets values to the four visual groups. */
+export function eventColorGroup(type: string): EventColorGroup {
+  const value = type.toLowerCase();
+  const normalized = type.replace(/\s+/g, "");
+
+  const includesAny = (words: string[]) => words.some((word) => normalized.includes(word));
+
+  if (value.includes("es") || includesAny(["\u5c65\u6b74\u66f8", "\u8ab2\u984c\u63d0\u51fa", "\u30dd\u30fc\u30c8\u30d5\u30a9\u30ea\u30aa"])) return "submission";
+  if (includesAny(["\u30c6\u30b9\u30c8", "Web\u30c6\u30b9\u30c8", "\u9069\u6027", "SPI", "\u6027\u683c\u691c\u67fb", "\u7389\u624b\u7bb1", "TG-WEB", "\u30b3\u30fc\u30c7\u30a3\u30f3\u30b0"]) || value.includes("spi") || value.includes("tg-web")) return "test";
+  if (includesAny(["\u9078\u8003\u4f1a", "\u8aac\u660e\u9078\u8003\u4f1a", "\u9762\u63a5", "GD", "\u30b0\u30eb\u30fc\u30d7", "\u30b1\u30fc\u30b9"]) || value.includes("gd")) return "selection";
+  if (includesAny(["\u8aac\u660e\u4f1a", "\u30bb\u30df\u30ca\u30fc", "\u9762\u8ac7", "\u30a4\u30f3\u30bf\u30fc\u30f3", "OB", "OG"]) || value.includes("ob")) return "participation";
+
+  return "other";
+}
 export function eventTypeTone(type: string) {
-  const kind = eventKindLabel(type);
-
-  if (kind === "面接" || kind === "面談") {
-    return "border-indigo-200 bg-indigo-50 text-indigo-700";
+  switch (eventColorGroup(type)) {
+    case "submission":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "test":
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+    case "participation":
+      return "border-violet-200 bg-violet-50 text-violet-700";
+    case "selection":
+      return "border-amber-200 bg-amber-50 text-amber-800";
+    default:
+      return "border-slate-200 bg-white text-slate-700";
   }
-
-  if (kind === "ES") {
-    return "border-sky-200 bg-sky-50 text-sky-700";
-  }
-
-  if (kind === "Webテスト" || kind === "適性検査") {
-    return "border-lime-200 bg-lime-50 text-lime-700";
-  }
-
-  if (kind === "インターン") {
-    return "border-violet-200 bg-violet-50 text-violet-700";
-  }
-
-  if (kind === "説明会") {
-    return "border-cyan-200 bg-cyan-50 text-cyan-700";
-  }
-
-  if (kind === "GD") {
-    return "border-amber-200 bg-amber-50 text-amber-700";
-  }
-
-  return "border-slate-200 bg-white text-slate-700";
 }
 
 export function eventTextTone(type: string) {
-  const kind = eventKindLabel(type);
-
-  if (kind === "面接" || kind === "面談") return "text-indigo-700";
-  if (kind === "ES") return "text-sky-700";
-  if (kind === "Webテスト" || kind === "適性検査") return "text-lime-700";
-  if (kind === "インターン") return "text-violet-700";
-  if (kind === "説明会") return "text-cyan-700";
-  if (kind === "GD") return "text-amber-700";
-  return "text-slate-700";
+  switch (eventColorGroup(type)) {
+    case "submission":
+      return "text-sky-700";
+    case "test":
+      return "text-emerald-700";
+    case "participation":
+      return "text-violet-700";
+    case "selection":
+      return "text-amber-800";
+    default:
+      return "text-slate-700";
+  }
 }
 
 export function eventKindLabel(type: string) {

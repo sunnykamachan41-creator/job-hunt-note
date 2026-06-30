@@ -6,6 +6,7 @@ import { google, calendar_v3 } from "googleapis";
 import { v4 as uuidv4 } from "uuid";
 
 import { defaultTimeZone } from "@/lib/datetime";
+import { isDateOnlyEvent } from "@/lib/planning";
 import {
   appendSheetRow,
   listSheetRows,
@@ -276,7 +277,7 @@ async function upsertAppSetting(group: string, value: string, sortOrder: string)
 
 async function buildCalendarResource(event: JobEvent, company: Company): Promise<calendar_v3.Schema$Event> {
   const calendarTimeZone = event.timezone?.trim() || await getConfiguredTimeZone();
-  const title = `${company.company_name} | ${event.event_type}`;
+  const title = `${company.company_name} | ${event.title || event.event_type}`;
   const description = [
     `company: ${company.company_name}`,
     `event type: ${event.event_type}`,
@@ -285,7 +286,7 @@ async function buildCalendarResource(event: JobEvent, company: Company): Promise
     event.memo ? `notes: ${event.memo}` : ""
   ].filter(Boolean).join("\n");
 
-  if (event.start_datetime) {
+  if (event.start_datetime && !isDateOnlyEvent(event)) {
     const start = toCalendarDateTime(event.start_datetime);
     const end = toCalendarDateTime(event.end_datetime || addMinutes(event.start_datetime, 60));
 
@@ -298,7 +299,7 @@ async function buildCalendarResource(event: JobEvent, company: Company): Promise
     };
   }
 
-  const date = event.period_end_date || new Date().toISOString().slice(0, 10);
+  const date = event.start_datetime.slice(0, 10) || event.period_end_date || new Date().toISOString().slice(0, 10);
 
   return {
     summary: title,

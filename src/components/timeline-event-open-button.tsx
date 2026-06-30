@@ -28,6 +28,7 @@ export function TimelineEventOpenButton({
       title={title}
       aria-label={ariaLabel ?? title}
       onClick={(clickEvent) => {
+        clickEvent.stopPropagation();
         const rect = clickEvent.currentTarget.getBoundingClientRect();
         window.dispatchEvent(new CustomEvent(openTimelineEventName, {
           detail: {

@@ -22,57 +22,70 @@ const minuteOptions = Array.from({ length: 12 }, (_, index) => pad(index * 5));
 export function EventDatetimeFields({
   startDatetime,
   endDatetime,
-  timeZone = "Asia/Tokyo"
+  timeZone = "Asia/Tokyo",
+  timeMode,
+  onDatetimeChange
 }: {
   startDatetime?: string;
   endDatetime?: string;
   timeZone?: string;
+  timeMode?: string;
+  onDatetimeChange?: (value: { startDatetime: string; endDatetime: string }) => void;
 }) {
   const initialStart = useMemo(() => parseDateTimeParts(startDatetime) ?? defaultStartParts(), [startDatetime]);
   const initialEnd = useMemo(
     () => parseDateTimeParts(endDatetime) ?? addMinutesToParts(initialStart, 60),
     [endDatetime, initialStart]
   );
+  const initialDurationMinutes = useMemo(
+    () => durationMinutes(initialStart, initialEnd),
+    [initialEnd, initialStart]
+  );
   const [start, setStart] = useState(initialStart);
   const [end, setEnd] = useState(initialEnd);
-  const [endTouched, setEndTouched] = useState(Boolean(endDatetime));
-  const [allDay, setAllDay] = useState(false);
+  const [endTouched, setEndTouched] = useState(false);
+  const [hasTime, setHasTime] = useState(initialHasTime(startDatetime, endDatetime, timeMode));
 
   useEffect(() => {
     setStart(initialStart);
     setEnd(initialEnd);
-    setEndTouched(Boolean(endDatetime));
-  }, [endDatetime, initialEnd, initialStart]);
+    setEndTouched(false);
+    setHasTime(initialHasTime(startDatetime, endDatetime, timeMode));
+  }, [endDatetime, initialEnd, initialStart, startDatetime, timeMode]);
 
-  const startValue = allDay ? `${start.date} 00:00` : `${start.date} ${start.time}`;
-  const endValue = allDay ? "" : `${end.date} ${end.time}`;
+  const startValue = hasTime ? `${start.date} ${start.time}` : `${start.date} 00:00`;
+  const endValue = hasTime ? `${end.date} ${end.time}` : "";
+
+  useEffect(() => {
+    onDatetimeChange?.({ startDatetime: startValue, endDatetime: endValue });
+  }, [endValue, onDatetimeChange, startValue]);
 
   return (
     <div className="grid gap-4 rounded-xl border border-line bg-slate-50 p-4">
       <input type="hidden" name="start_datetime" value={startValue} />
       <input type="hidden" name="end_datetime" value={endValue} />
+      <input type="hidden" name="time_mode" value={hasTime ? "datetime" : "date_only"} />
       <div className="grid min-w-0 gap-3">
         <div className="grid min-w-0 grid-cols-[minmax(11rem,1fr)_8.75rem] gap-3">
           <input
             type="date"
             value={start.date}
             onChange={(event) => {
+              const currentDurationMinutes = durationMinutes(start, end);
               const next = { ...start, date: event.target.value };
               setStart(next);
-              if (!endTouched) {
-                setEnd(addMinutesToParts(next, 60));
-              }
+              setEnd(addMinutesToParts(next, currentDurationMinutes));
             }}
             className="h-11 min-w-0 rounded-lg border-0 bg-white px-3 text-sm font-semibold text-ink shadow-sm"
           />
           <TimeSelect
             value={start.time}
-            disabled={allDay}
+            disabled={!hasTime}
             onChange={(event) => {
               const next = { ...start, time: event };
               setStart(next);
               if (!endTouched) {
-                setEnd(addMinutesToParts(next, 60));
+                setEnd(addMinutesToParts(next, initialDurationMinutes));
               }
             }}
             className="h-11 min-w-0 rounded-lg border-0 bg-white px-3 text-sm font-semibold text-ink shadow-sm disabled:text-subtle"
@@ -82,7 +95,7 @@ export function EventDatetimeFields({
           <input
             type="date"
             value={end.date}
-            disabled={allDay}
+            disabled={!hasTime}
             onChange={(event) => {
               setEndTouched(true);
               setEnd({ ...end, date: event.target.value });
@@ -91,7 +104,7 @@ export function EventDatetimeFields({
           />
           <TimeSelect
             value={end.time}
-            disabled={allDay}
+            disabled={!hasTime}
             onChange={(event) => {
               setEndTouched(true);
               setEnd({ ...end, time: event });
@@ -101,13 +114,14 @@ export function EventDatetimeFields({
         </div>
       </div>
       <div className="grid min-w-0 gap-2 text-sm">
-        <label className="inline-flex items-center gap-2 font-semibold text-ink">
+        <label className="inline-flex items-center gap-2 text-[0px] font-semibold text-ink">
           <input
             type="checkbox"
-            checked={allDay}
-            onChange={(event) => setAllDay(event.target.checked)}
+            checked={hasTime}
+            onChange={(event) => setHasTime(event.target.checked)}
             className="h-4 w-4 accent-brand"
           />
+          <span className="text-sm">時刻を指定する</span>
           終日
         </label>
         <TimeZoneSelect
@@ -118,6 +132,12 @@ export function EventDatetimeFields({
       </div>
     </div>
   );
+}
+
+function initialHasTime(startDatetime?: string, endDatetime?: string, timeMode?: string) {
+  if (timeMode === "date_only") return false;
+  if (timeMode === "datetime") return true;
+  return !(Boolean(startDatetime) && /(?:T|\s)00:00$/.test(startDatetime ?? "") && !endDatetime);
 }
 
 function TimeSelect({
@@ -246,6 +266,14 @@ function addMinutesToParts(parts: { date: string; time: string }, minutes: numbe
     date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
     time: `${pad(date.getHours())}:${pad(date.getMinutes())}`
   };
+}
+
+function durationMinutes(start: { date: string; time: string }, end: { date: string; time: string }) {
+  const startDate = new Date(`${start.date}T${start.time}`);
+  const endDate = new Date(`${end.date}T${end.time}`);
+  const difference = endDate.getTime() - startDate.getTime();
+
+  return Number.isFinite(difference) && difference > 0 ? Math.round(difference / 60_000) : 60;
 }
 
 function partsToDatetime(parts: { date: string; time: string }) {

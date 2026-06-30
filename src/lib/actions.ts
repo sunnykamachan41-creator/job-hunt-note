@@ -51,6 +51,9 @@ type LocalEventSyncInput = {
   timezone: string;
   is_period: string;
   period_end_date: string;
+  event_series_id: string;
+  series_day_index: string;
+  time_mode: string;
   status: string;
   person: string;
   meeting_url: string;
@@ -59,6 +62,14 @@ type LocalEventSyncInput = {
 };
 
 type LocalEventUpdateSyncInput = LocalEventSyncInput & {
+  event_id: string;
+};
+
+type LocalCompanyDeleteSyncInput = {
+  company_id: string;
+};
+
+type LocalEventDeleteSyncInput = {
   event_id: string;
 };
 
@@ -142,17 +153,24 @@ export async function syncLocalCompany(formData: FormData) {
   refresh(formData);
 }
 
-export async function syncLocalDrafts(formData: FormData) {
+export async function syncLocalDrafts(formData: FormData): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const companyDrafts = parseJsonArray<LocalCompanySyncInput>(formData.get("companies_json"));
     const eventDrafts = parseJsonArray<LocalEventSyncInput>(formData.get("events_json"));
     const companyUpdates = parseJsonArray<LocalCompanyUpdateSyncInput>(formData.get("company_updates_json"));
     const eventUpdates = parseJsonArray<LocalEventUpdateSyncInput>(formData.get("event_updates_json"));
+    const companyDeletes = parseJsonArray<LocalCompanyDeleteSyncInput>(formData.get("company_deletes_json"));
+    const eventDeletes = parseJsonArray<LocalEventDeleteSyncInput>(formData.get("event_deletes_json"));
     const now = nowInTokyo();
     const companyMap = new Map<string, Company>();
+    const eventMap = new Map<string, JobEvent>();
 
     for (const company of await listExistingCompanies()) {
       companyMap.set(company.company_id, company);
+    }
+
+    for (const event of await listSheetRows<JobEvent>("events", { fresh: true })) {
+      eventMap.set(event.event_id, event);
     }
 
     for (const draft of companyDrafts) {
@@ -168,7 +186,15 @@ export async function syncLocalDrafts(formData: FormData) {
         application_source: input.application_source
       } satisfies Company;
 
-      await appendSheetRow("companies", company);
+      const existing = companyMap.get(companyId);
+      if (existing) {
+        await updateSheetRowById("companies", "company_id", companyId, {
+          ...company,
+          created_at: existing.created_at
+        } satisfies Company);
+      } else {
+        await appendSheetRow("companies", company);
+      }
       companyMap.set(company.company_id, company);
     }
 
@@ -182,6 +208,9 @@ export async function syncLocalDrafts(formData: FormData) {
 
       const end = completeEventEndDatetime(input.event_type, input.start_datetime, input.end_datetime);
       const eventId = draft.draft_id || uuidv4();
+      if (eventMap.has(eventId)) {
+        continue;
+      }
       let calendarEventId = "";
       let calendarLastSyncedAt = "";
       let syncToCalendar = input.sync_to_calendar;
@@ -196,6 +225,9 @@ export async function syncLocalDrafts(formData: FormData) {
         timezone: input.timezone,
         is_period: input.is_period,
         period_end_date: input.period_end_date,
+        event_series_id: input.event_series_id,
+        series_day_index: input.series_day_index,
+        time_mode: input.time_mode,
         status: input.status,
         person: input.person,
         meeting_url: input.meeting_url,
@@ -223,6 +255,7 @@ export async function syncLocalDrafts(formData: FormData) {
         google_calendar_event_id: calendarEventId,
         calendar_last_synced_at: calendarLastSyncedAt
       } satisfies JobEvent);
+      eventMap.set(eventId, event);
     }
 
     for (const draft of companyUpdates) {
@@ -280,6 +313,9 @@ export async function syncLocalDrafts(formData: FormData) {
         timezone: input.timezone,
         is_period: input.is_period,
         period_end_date: input.period_end_date,
+        event_series_id: input.event_series_id,
+        series_day_index: input.series_day_index,
+        time_mode: input.time_mode,
         status: input.status,
         person: input.person,
         meeting_url: input.meeting_url,
@@ -291,16 +327,21 @@ export async function syncLocalDrafts(formData: FormData) {
         updated_at: now
       } satisfies JobEvent;
 
-      if (input.sync_to_calendar === "true" && calendarEventId) {
-        await updateCalendarEventForAction(nextEvent, company);
-        calendarLastSyncedAt = nowInTokyo();
-      } else if (input.sync_to_calendar === "true" && !calendarEventId) {
-        calendarEventId = await createCalendarEventForAction(nextEvent, company);
-        calendarLastSyncedAt = nowInTokyo();
-      } else if (input.sync_to_calendar === "false" && calendarEventId) {
-        await deleteCalendarEventForAction(calendarEventId);
-        calendarEventId = "";
-        calendarLastSyncedAt = "";
+      try {
+        if (input.sync_to_calendar === "true" && calendarEventId) {
+          await updateCalendarEventForAction(nextEvent, company);
+          calendarLastSyncedAt = nowInTokyo();
+        } else if (input.sync_to_calendar === "true" && !calendarEventId) {
+          calendarEventId = await createCalendarEventForAction(nextEvent, company);
+          calendarLastSyncedAt = nowInTokyo();
+        } else if (input.sync_to_calendar === "false" && calendarEventId) {
+          await deleteCalendarEventForAction(calendarEventId);
+          calendarEventId = "";
+          calendarLastSyncedAt = "";
+        }
+      } catch (error) {
+        // Google Calendar is a mirror. Its failure must not block Sheets, the app's source of truth.
+        console.error("Google Calendar event update failed during local sync", error);
       }
 
       await updateSheetRowById("events", "event_id", input.event_id, {
@@ -309,10 +350,37 @@ export async function syncLocalDrafts(formData: FormData) {
         calendar_last_synced_at: calendarLastSyncedAt
       } satisfies JobEvent);
     }
+
+    for (const draft of eventDeletes) {
+      const input = eventDeleteSchema.parse(draft);
+      const existing = eventMap.get(input.event_id) ?? await findSheetRow<JobEvent>(
+        "events",
+        (event) => event.event_id === input.event_id,
+        `event_id "${input.event_id}"`
+      );
+
+      if (existing.google_calendar_event_id) {
+        try {
+          await deleteCalendarEventForAction(existing.google_calendar_event_id);
+        } catch (error) {
+          console.error("Google Calendar event deletion failed during local sync", error);
+        }
+      }
+
+      await deleteSheetRowById("events", "event_id", input.event_id);
+      eventMap.delete(input.event_id);
+    }
+
+    for (const draft of companyDeletes) {
+      const input = companyDeleteSchema.parse(draft);
+      await deleteSheetRowById("companies", "company_id", input.company_id);
+      companyMap.delete(input.company_id);
+    }
   } catch (error) {
-    fail(error, formData);
+    return { ok: false, error: formatValidationError(error) };
   }
-  refresh(formData);
+
+  return { ok: true };
 }
 
 export async function updateCompany(formData: FormData) {
@@ -375,6 +443,9 @@ export async function createEvent(formData: FormData) {
       timezone: input.timezone,
       is_period: input.is_period,
       period_end_date: input.period_end_date,
+      event_series_id: input.event_series_id,
+      series_day_index: input.series_day_index,
+      time_mode: input.time_mode,
       status: input.status,
       person: input.person,
       meeting_url: input.meeting_url,
@@ -432,6 +503,9 @@ export async function updateEvent(formData: FormData) {
       timezone: input.timezone,
       is_period: input.is_period,
       period_end_date: input.period_end_date,
+      event_series_id: input.event_series_id,
+      series_day_index: input.series_day_index,
+      time_mode: input.time_mode,
       status: input.status,
       person: input.person,
       meeting_url: input.meeting_url,

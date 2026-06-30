@@ -1,4 +1,4 @@
-export const companyStatuses = ["選考中", "通過", "落選", "辞退", "保留", "内定"] as const;
+export const companyStatuses = ["検討中", "選考中", "辞退", "落選", "内定"] as const;
 
 export type CompanyStatus = (typeof companyStatuses)[number];
 

@@ -75,6 +75,7 @@ export function EditEntityActions({
         {event ? (
           <EventDraftEditSidebar
             event={event}
+            events={events}
             companies={companies}
             eventTypeOptions={eventTypeOptions}
             timeZone={timeZone}

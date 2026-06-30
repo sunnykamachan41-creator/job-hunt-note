@@ -1,5 +1,5 @@
-event_id,company_id,selection_type,event_type,title,start_datetime,end_datetime,timezone,is_period,period_end_date,status,person,meeting_url,memo,sync_to_calendar,google_calendar_event_id,calendar_last_synced_at,created_at,updated_at
-evt001,cmp001,本選考,ES提出,,2026/6/10 23:59,,Asia/Tokyo,false,,通過,,,,false,,,,
-evt002,cmp001,本選考,Webテスト,,2026/6/14 18:00,,Asia/Tokyo,false,,通過,,,,false,,,,
-evt003,cmp001,本選考,一次面接,,2026/6/20 14:00,,Asia/Tokyo,false,,予定,,,,true,,,,
-evt004,cmp002,本選考,GD,,2026/6/18 10:00,,Asia/Tokyo,false,,予定,,,,true,,,,
+event_id,company_id,selection_type,event_type,title,start_datetime,end_datetime,timezone,is_period,period_end_date,status,person,meeting_url,memo,sync_to_calendar,google_calendar_event_id,calendar_last_synced_at,created_at,updated_at,event_series_id,series_day_index
+evt001,cmp001,本選老EES提�E,,2026/6/10 23:59,,Asia/Tokyo,FALSE,,通過,,,,FALSE,,,,,,,
+evt002,cmp001,本選老EWebチE��チE,2026/6/14 18:00,,Asia/Tokyo,FALSE,,通過,,,,FALSE,,,,,,,,
+evt003,cmp001,本選老E一次面接,,2026/6/20 14:00,,Asia/Tokyo,FALSE,,予宁E,,,TRUE,,,,,,,,
+evt004,cmp002,本選老EGD,,2026/6/18 10:00,,Asia/Tokyo,FALSE,,予宁E,,,TRUE,,,,,,,,

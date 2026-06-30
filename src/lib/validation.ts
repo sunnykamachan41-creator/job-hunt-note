@@ -32,7 +32,7 @@ const numericString = z
 export const companyCreateSchema = z.object({
   company_name: z.string().trim().min(1, "企業名は必須です"),
   industry: optionalText,
-  status: z.enum(companyStatuses).default("選考中"),
+  status: z.enum(companyStatuses).default("検討中"),
   mypage_url: optionalUrl,
   memo: optionalText,
   application_source: optionalText
@@ -56,6 +56,9 @@ const eventBaseSchema = z.object({
   timezone: timeZoneSchema,
   is_period: booleanString.default("false"),
   period_end_date: dateSchema,
+  event_series_id: optionalText.default(""),
+  series_day_index: numericString.default(""),
+  time_mode: z.enum(["datetime", "date_only"]).default("datetime"),
   status: z.enum(eventStatuses).default("予定"),
   person: optionalText,
   meeting_url: optionalUrl,

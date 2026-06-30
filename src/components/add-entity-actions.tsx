@@ -1,23 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import { addMinutesLocal } from "@/components/event-datetime-fields";
 
 import {
   saveLocalCompanyDraft,
-  saveLocalEventDraft,
-  useLocalCompanyDrafts,
+  saveLocalEventDrafts,
   type LocalCompanyDraft,
   type LocalEventDraft
 } from "@/components/local-draft-sync-panel";
 import { Button } from "@/components/ui/button";
+import { PeriodEventFields } from "@/components/period-event-fields";
 import { defaultCalendarSyncForEventType } from "@/lib/calendar-sync";
 import type { SheetRow } from "@/lib/google-sheets";
+import { eventColorGroup } from "@/lib/planning";
 import type { Company } from "@/types/company";
 import { companyStatuses } from "@/types/company";
-import { eventSelectionTypes, eventStatuses } from "@/types/event";
+import { eventSelectionTypes, eventStatuses as allEventStatuses } from "@/types/event";
 
 type AddMode = "company" | "event" | null;
+type AddRequest = AddMode | { mode?: AddMode; companyId?: string; date?: string; startDatetime?: string; endDatetime?: string; timeMode?: string };
+const addPreviewEventName = "job-hunt-note:event-add-preview";
+const clearPreviewEventName = "job-hunt-note:event-preview-clear";
 
 const EventDatetimeFields = dynamic(
   () => import("@/components/event-datetime-fields").then((mod) => mod.EventDatetimeFields),
@@ -33,67 +38,134 @@ export function AddEntityActions({
   eventTypeOptions,
   timeZone = "Asia/Tokyo",
   initialMode,
+  request,
+  requestVersion,
   inline = true,
-  returnTo = "/?view=companies"
+  returnTo = "/?view=companies",
+  listenToGlobal = true,
+  eventPresentation = "fixed",
+  onClose
 }: {
   companies: SheetRow<Company>[];
   applicationSources: string[];
   eventTypeOptions: string[];
   timeZone?: string;
   initialMode?: AddMode;
+  request?: AddRequest | null;
+  requestVersion?: number;
   inline?: boolean;
   returnTo?: string;
+  listenToGlobal?: boolean;
+  eventPresentation?: "fixed" | "panel";
+  onClose?: () => void;
 }) {
   const [mode, setMode] = useState<AddMode>(initialMode ?? null);
+  const [defaultCompanyId, setDefaultCompanyId] = useState("");
+  const [defaultStartDatetime, setDefaultStartDatetime] = useState("");
+  const [defaultEndDatetime, setDefaultEndDatetime] = useState("");
+  const [defaultTimeMode, setDefaultTimeMode] = useState<string | undefined>(undefined);
   const [eventType, setEventType] = useState(eventTypeOptions[0] ?? "");
+  const [eventDatetime, setEventDatetime] = useState({ startDatetime: "", endDatetime: "" });
   const [syncToCalendar, setSyncToCalendar] = useState(defaultCalendarSyncForEventType(eventTypeOptions[0] ?? ""));
-  const localCompanies = useLocalCompanyDrafts();
-  const selectableCompanies = [
-    ...localCompanies.map((company) => ({
-      _rowNumber: -1,
-      company_id: company.company_id,
-      company_name: `${company.company_name}（未同期）`,
-      industry: company.industry,
-      status: company.status,
-      recruitment_source: "",
-      order_index: "0",
-      mypage_url: company.mypage_url,
-      memo: company.memo,
-      created_at: company.created_at,
-      updated_at: company.created_at,
-      application_source: company.application_source
-    } satisfies SheetRow<Company>)),
-    ...companies
-  ];
+  const [isDirty, setIsDirty] = useState(false);
+  const eventStatuses = eventStatusOptionsForType(eventType);
+  const isSavingRef = useRef(false);
+  const selectableCompanies = useMemo(() => {
+    const byId = new Map<string, SheetRow<Company>>();
+    for (const company of companies) {
+      if (!byId.has(company.company_id)) {
+        byId.set(company.company_id, company);
+      }
+    }
+
+    return [...byId.values()];
+  }, [companies]);
 
   useEffect(() => {
     setMode(initialMode ?? null);
   }, [initialMode]);
 
-  useEffect(() => {
-    function onOpen(event: Event) {
-      const mode = (event as CustomEvent<AddMode>).detail;
-      if (mode === "company" || mode === "event") {
-        setMode(mode);
+  const openFromRequest = useCallback((detail: AddRequest) => {
+    const nextMode = typeof detail === "object" && detail !== null ? detail.mode : detail;
+    if (nextMode === "company" || nextMode === "event") {
+      isSavingRef.current = false;
+      const requestedStart = nextMode === "event" && typeof detail === "object" && detail?.startDatetime ? detail.startDatetime : "";
+      const requestedDate = nextMode === "event" && typeof detail === "object" && detail?.date ? detail.date : "";
+      const startDatetime = requestedStart || (requestedDate ? `${requestedDate} 09:00` : "");
+      const endDatetime = nextMode === "event" && typeof detail === "object" && detail?.endDatetime ? detail.endDatetime : startDatetime ? addMinutesLocal(startDatetime, 60) : "";
+      const requestedCompanyId = nextMode === "event" && typeof detail === "object" && detail?.companyId ? detail.companyId : "";
+      setDefaultCompanyId(requestedCompanyId);
+      setDefaultStartDatetime(startDatetime);
+      setDefaultEndDatetime(endDatetime);
+      setDefaultTimeMode(nextMode === "event" && typeof detail === "object" && detail?.timeMode ? detail.timeMode : undefined);
+      setIsDirty(false);
+      if (nextMode === "event" && requestedDate) {
+        emitEventAddPreview({ date: requestedDate, companyId: requestedCompanyId, startDatetime, endDatetime });
       }
+      setMode(nextMode);
+    }
+  }, []);
+
+  useEffect(() => {
+    function onPreviewChange(event: Event) {
+      const detail = (event as CustomEvent<{ companyId?: string; startDatetime?: string; endDatetime?: string; date?: string }>).detail;
+      if (!detail?.startDatetime) return;
+      if (detail.companyId) {
+        setDefaultCompanyId(detail.companyId);
+      }
+      setDefaultStartDatetime(detail.startDatetime);
+      setDefaultEndDatetime(detail.endDatetime || "");
+      setDefaultTimeMode(detail.endDatetime ? "datetime" : "date_only");
+      setEventDatetime({ startDatetime: detail.startDatetime, endDatetime: detail.endDatetime || "" });
+      setIsDirty(true);
     }
 
+    window.addEventListener("job-hunt-note:event-add-preview-change", onPreviewChange);
+    return () => window.removeEventListener("job-hunt-note:event-add-preview-change", onPreviewChange);
+  }, []);
+
+  useEffect(() => {
+    function onOpen(event: Event) {
+      openFromRequest((event as CustomEvent<AddRequest>).detail);
+    }
+
+    if (!listenToGlobal) return;
     window.addEventListener("job-hunt-note:add", onOpen);
     return () => window.removeEventListener("job-hunt-note:add", onOpen);
-  }, []);
+  }, [listenToGlobal, openFromRequest]);
+
+  useEffect(() => {
+    if (request) {
+      openFromRequest(request);
+    }
+  }, [openFromRequest, request, requestVersion]);
+
+  useEffect(() => {
+    if (mode) {
+      isSavingRef.current = false;
+      setIsDirty(false);
+    }
+  }, [mode]);
 
   useEffect(() => {
     const nextType = eventTypeOptions[0] ?? "";
     setEventType(nextType);
+    setDefaultTimeMode(defaultTimeModeForEventType(nextType));
     setSyncToCalendar(defaultCalendarSyncForEventType(nextType));
   }, [eventTypeOptions]);
 
   const close = useCallback(function close() {
+    clearEventAddPreview();
     setMode(null);
+    onClose?.();
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", inline ? `${returnTo}#add-actions` : returnTo);
     }
-  }, [inline, returnTo]);
+  }, [inline, onClose, returnTo]);
+
+  useEffect(() => {
+    return () => clearEventAddPreview();
+  }, []);
 
   useEffect(() => {
     if (!mode) return;
@@ -110,30 +182,39 @@ export function AddEntityActions({
 
   function handleEventDraftSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!isDirty) return;
+    if (isSavingRef.current) return;
+    isSavingRef.current = true;
     const formData = new FormData(event.currentTarget);
-    const draft = localDraftFromFormData(formData);
+    const drafts = localDraftsFromFormData(formData);
+    const draft = drafts[0];
 
-    if (!draft.company_id) {
+    if (!draft?.company_id) {
+      isSavingRef.current = false;
       window.alert("企業を選択してください。");
       return;
     }
 
-    saveLocalEventDraft(draft);
     close();
+    queueTask(() => saveLocalEventDrafts(drafts));
   }
 
   function handleCompanyDraftSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!isDirty) return;
+    if (isSavingRef.current) return;
+    isSavingRef.current = true;
     const formData = new FormData(event.currentTarget);
     const draft = localCompanyDraftFromFormData(formData);
 
     if (!draft.company_name) {
+      isSavingRef.current = false;
       window.alert("企業名を入力してください。");
       return;
     }
 
-    saveLocalCompanyDraft(draft);
     close();
+    queueTask(() => saveLocalCompanyDraft(draft));
   }
 
   return (
@@ -185,7 +266,7 @@ export function AddEntityActions({
                 閉じる
               </button>
             </div>
-            <form onSubmit={handleCompanyDraftSave} className="grid gap-4 p-6">
+            <form onSubmit={handleCompanyDraftSave} onChangeCapture={() => setIsDirty(true)} className="grid gap-4 p-6">
               <input type="hidden" name="returnTo" value={returnTo} />
               <Field label="企業名"><input name="company_name" required placeholder="例: ワークスアプリケーションズ" /></Field>
               <div className="grid gap-4 md:grid-cols-2">
@@ -197,7 +278,7 @@ export function AddEntityActions({
               </div>
               <Field label="企業 / 採用URL"><input name="mypage_url" type="url" placeholder="https://" /></Field>
               <Field label="メモ"><textarea name="memo" rows={3} placeholder="選考メモ、志望理由、気になる点など" /></Field>
-              <div className="flex justify-end gap-2">
+              <div className="sticky bottom-0 -mx-6 -mb-6 flex justify-end gap-2 border-t border-line bg-white px-6 py-4">
                 <button
                   type="button"
                   onClick={close}
@@ -205,7 +286,7 @@ export function AddEntityActions({
                 >
                   キャンセル
                 </button>
-                <Button tone="primary">保存</Button>
+                <Button tone="primary" disabled={!isDirty}>保存</Button>
               </div>
             </form>
           </div>
@@ -213,7 +294,7 @@ export function AddEntityActions({
       ) : null}
 
       {mode === "event" ? (
-        <div className="fixed bottom-0 right-0 top-0 z-[120] w-full max-w-[480px] border-l border-line bg-white shadow-[-12px_0_32px_rgba(15,23,42,0.08)]">
+        <div className={eventPresentation === "panel" ? "h-full w-full" : "fixed bottom-0 right-0 top-0 z-[120] w-full max-w-[480px] border-l border-line bg-white shadow-[-12px_0_32px_rgba(15,23,42,0.08)]"}>
           <div
             className="flex h-full w-full flex-col"
             onMouseDown={(event) => event.stopPropagation()}
@@ -231,9 +312,9 @@ export function AddEntityActions({
                 閉じる
               </button>
             </div>
-            <form onSubmit={handleEventDraftSave} className="grid flex-1 content-start gap-4 overflow-y-auto overflow-x-hidden p-6">
+            <form onSubmit={handleEventDraftSave} onChangeCapture={() => setIsDirty(true)} className="grid flex-1 content-start gap-4 overflow-y-auto overflow-x-hidden p-6">
               <input type="hidden" name="returnTo" value={returnTo} />
-              <Field label="企業"><CompanySelect companies={selectableCompanies} /></Field>
+              <Field label="企業"><CompanySelect key={defaultCompanyId || "empty-company"} companies={selectableCompanies} defaultValue={defaultCompanyId} /></Field>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="選考区分"><Select name="selection_type" options={eventSelectionTypes} /></Field>
                 <Field label="イベント種別">
@@ -243,6 +324,7 @@ export function AddEntityActions({
                     value={eventType}
                     onChange={(value) => {
                       setEventType(value);
+                      setDefaultTimeMode(defaultTimeModeForEventType(value));
                       setSyncToCalendar(defaultCalendarSyncForEventType(value));
                     }}
                   />
@@ -251,15 +333,29 @@ export function AddEntityActions({
               </div>
               <CalendarSyncToggle checked={syncToCalendar} onChange={setSyncToCalendar} />
               <Field label="タイトル / サブ種別"><input name="title" placeholder="一次面接" /></Field>
-              <EventDatetimeFields timeZone={timeZone} />
-              <div className="grid gap-4 md:grid-cols-2">
-                <Field label="期間イベント"><Select name="is_period" options={["false", "true"]} /></Field>
-                <Field label="期間終了日"><input name="period_end_date" type="date" /></Field>
-              </div>
+              <EventDatetimeFields
+                startDatetime={defaultStartDatetime}
+                endDatetime={defaultEndDatetime}
+                timeZone={timeZone}
+                timeMode={defaultTimeMode ?? defaultTimeModeForEventType(eventType)}
+                onDatetimeChange={(value) => {
+                  setEventDatetime(value);
+                  const date = value.startDatetime.slice(0, 10);
+                  if (date) {
+                    emitEventAddPreview({
+                      date,
+                      companyId: defaultCompanyId,
+                      startDatetime: value.startDatetime,
+                      endDatetime: value.endDatetime
+                    });
+                  }
+                }}
+              />
+              <PeriodEventFields startDatetime={eventDatetime.startDatetime} endDatetime={eventDatetime.endDatetime} />
               <Field label="担当者"><input name="person" placeholder="担当者名" /></Field>
               <Field label="場所 / URL"><input name="meeting_url" type="url" placeholder="https://" /></Field>
               <Field label="メモ"><textarea name="memo" rows={4} placeholder="準備事項、聞きたいことなど" /></Field>
-              <div className="mt-auto flex justify-end gap-2 border-t border-line pt-4">
+              <div className="sticky bottom-0 z-10 -mx-6 mt-2 flex justify-end gap-2 border-t border-line bg-white px-6 py-4">
                 <button
                   type="button"
                   onClick={close}
@@ -267,7 +363,7 @@ export function AddEntityActions({
                 >
                   キャンセル
                 </button>
-                <Button tone="primary" disabled={!companies.length}>ローカル保存</Button>
+                <Button tone="primary" disabled={!companies.length || !isDirty}>ローカル保存</Button>
               </div>
             </form>
           </div>
@@ -277,9 +373,8 @@ export function AddEntityActions({
   );
 }
 
-function localDraftFromFormData(formData: FormData): LocalEventDraft {
-  return {
-    draft_id: crypto.randomUUID(),
+function localDraftsFromFormData(formData: FormData): LocalEventDraft[] {
+  const base = {
     company_id: text(formData, "company_id"),
     selection_type: text(formData, "selection_type") || "本選考",
     event_type: text(formData, "event_type"),
@@ -294,8 +389,90 @@ function localDraftFromFormData(formData: FormData): LocalEventDraft {
     memo: text(formData, "memo"),
     sync_to_calendar: booleanText(formData, "sync_to_calendar"),
     timezone: text(formData, "timezone") || "Asia/Tokyo",
+    time_mode: text(formData, "time_mode") || "datetime",
     created_at: new Date().toISOString()
   };
+
+  if (base.is_period !== "true") {
+    return [{ ...base, draft_id: crypto.randomUUID(), event_series_id: "", series_day_index: "" }];
+  }
+
+  const schedules = parsePeriodSchedules(text(formData, "period_days_json"));
+  const resolvedSchedules = schedules.length ? schedules : fallbackPeriodSchedules(base);
+  const seriesId = crypto.randomUUID();
+  const titleBase = base.title || base.event_type;
+
+  return resolvedSchedules.map((schedule, index) => ({
+    ...base,
+    draft_id: crypto.randomUUID(),
+    title: `${titleBase} | Day ${index + 1}`,
+    start_datetime: `${schedule.date} ${schedule.startTime}`,
+    end_datetime: `${schedule.date} ${schedule.endTime}`,
+    is_period: "false",
+    period_end_date: "",
+    event_series_id: seriesId,
+    series_day_index: String(index + 1),
+    time_mode: base.time_mode
+  }));
+}
+
+function parsePeriodSchedules(value: string) {
+  try {
+    const parsed = JSON.parse(value) as Array<{ date?: string; startTime?: string; endTime?: string }>;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((schedule) => /^\d{4}-\d{2}-\d{2}$/.test(schedule.date ?? "") && /^\d{2}:\d{2}$/.test(schedule.startTime ?? "") && /^\d{2}:\d{2}$/.test(schedule.endTime ?? "")) as Array<{ date: string; startTime: string; endTime: string }>;
+  } catch {
+    return [];
+  }
+}
+
+function emitEventAddPreview(detail: { date: string; companyId?: string; startDatetime?: string; endDatetime?: string }) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(addPreviewEventName, { detail }));
+}
+
+function clearEventAddPreview() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(clearPreviewEventName));
+}
+
+function defaultTimeModeForEventType(eventType: string) {
+  const group = eventColorGroup(eventType);
+  return group === "submission" || group === "test" ? "date_only" : "datetime";
+}
+function eventStatusOptionsForType(eventType: string) {
+  const group = eventColorGroup(eventType);
+  if (group === "test" || group === "selection") {
+    return allEventStatuses.filter((status) => status !== "完了" && status !== "保留");
+  }
+  return allEventStatuses.filter((status) => status !== "結果待ち" && status !== "保留");
+}
+
+function fallbackPeriodSchedules(base: Omit<LocalEventDraft, "draft_id" | "event_series_id" | "series_day_index">) {
+  const startDate = base.start_datetime.slice(0, 10);
+  const startTime = base.start_datetime.slice(-5) || "09:00";
+  const endTime = base.end_datetime.slice(-5) || "10:00";
+  const endDate = base.period_end_date || startDate;
+  const dates: Array<{ date: string; startTime: string; endTime: string }> = [];
+  const cursor = parseLocalDate(startDate);
+  const last = parseLocalDate(endDate);
+
+  while (!Number.isNaN(cursor.getTime()) && cursor <= last && dates.length < 31) {
+    dates.push({ date: formatDateKey(cursor), startTime, endTime });
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dates;
+}
+
+function parseLocalDate(value: string) {
+  const matched = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!matched) return new Date(Number.NaN);
+  return new Date(Number(matched[1]), Number(matched[2]) - 1, Number(matched[3]));
+}
+
+function formatDateKey(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
 function localCompanyDraftFromFormData(formData: FormData): LocalCompanyDraft {
@@ -306,7 +483,7 @@ function localCompanyDraftFromFormData(formData: FormData): LocalCompanyDraft {
     company_id: companyId,
     company_name: text(formData, "company_name"),
     industry: text(formData, "industry"),
-    status: text(formData, "status") || "選考中",
+    status: text(formData, "status") || "検討中",
     mypage_url: normalizeUrl(text(formData, "mypage_url")),
     memo: text(formData, "memo"),
     application_source: text(formData, "application_source"),
@@ -330,6 +507,10 @@ function normalizeUrl(value: string) {
     return `https://${value}`;
   }
   return value;
+}
+
+function queueTask(task: () => void) {
+  window.setTimeout(task, 0);
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

@@ -1,4 +1,4 @@
-export const eventStatuses = ["予定", "完了", "通過", "落選", "辞退", "保留", "内定"] as const;
+export const eventStatuses = ["予定", "完了", "結果待ち", "通過", "落選", "辞退", "保留", "内定"] as const;
 export const eventSelectionTypes = ["本選考", "インターン"] as const;
 
 export const deadlineEventTypes = ["ES", "ES提出", "Webテスト", "適性検査"] as const;
@@ -18,6 +18,9 @@ export type JobEvent = {
   timezone: string;
   is_period: string;
   period_end_date: string;
+  event_series_id: string;
+  series_day_index: string;
+  time_mode: "datetime" | "date_only" | string;
   status: EventStatus | string;
   person: string;
   meeting_url: string;
@@ -50,5 +53,8 @@ export const eventColumns = [
   "google_calendar_event_id",
   "calendar_last_synced_at",
   "created_at",
-  "updated_at"
+  "updated_at",
+  "event_series_id",
+  "series_day_index",
+  "time_mode"
 ] as const satisfies readonly (keyof JobEvent)[];

@@ -1,10 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
-import { Button } from "@/components/ui/button";
-import { createEvent, syncLocalCompany, syncLocalDrafts } from "@/lib/actions";
 import type { SheetRow } from "@/lib/google-sheets";
 import type { Company } from "@/types/company";
 
@@ -12,7 +9,10 @@ export const localEventDraftsKey = "job-hunt-note.localEventDrafts";
 export const localCompanyDraftsKey = "job-hunt-note.localCompanyDrafts";
 export const localEventUpdatesKey = "job-hunt-note.localEventUpdates";
 export const localCompanyUpdatesKey = "job-hunt-note.localCompanyUpdates";
+export const localEventDeletesKey = "job-hunt-note.localEventDeletes";
+export const localCompanyDeletesKey = "job-hunt-note.localCompanyDeletes";
 const localDraftsChangedEvent = "job-hunt-note.localDraftsChanged";
+export const localDraftsSyncedEvent = "job-hunt-note.localDraftsSynced";
 
 export type LocalEventDraft = {
   draft_id: string;
@@ -24,6 +24,9 @@ export type LocalEventDraft = {
   end_datetime: string;
   is_period: string;
   period_end_date: string;
+  event_series_id: string;
+  series_day_index: string;
+  time_mode: string;
   status: string;
   person: string;
   meeting_url: string;
@@ -31,6 +34,7 @@ export type LocalEventDraft = {
   sync_to_calendar: string;
   timezone: string;
   created_at: string;
+  synced_at?: string;
 };
 
 export type LocalCompanyDraft = {
@@ -43,6 +47,7 @@ export type LocalCompanyDraft = {
   memo: string;
   application_source: string;
   created_at: string;
+  synced_at?: string;
 };
 
 export type LocalEventUpdateDraft = LocalEventDraft & {
@@ -53,9 +58,29 @@ export type LocalCompanyUpdateDraft = LocalCompanyDraft & {
   company_id: string;
 };
 
+export type LocalEventDeleteDraft = {
+  event_id: string;
+  label: string;
+  created_at: string;
+  synced_at?: string;
+};
+
+export type LocalCompanyDeleteDraft = {
+  company_id: string;
+  label: string;
+  created_at: string;
+  synced_at?: string;
+};
+
 export function saveLocalEventDraft(draft: LocalEventDraft) {
-  const drafts = readLocalEventDrafts().filter((item) => item.draft_id !== draft.draft_id);
-  window.localStorage.setItem(localEventDraftsKey, JSON.stringify([draft, ...drafts]));
+  saveLocalEventDrafts([draft]);
+}
+
+export function saveLocalEventDrafts(nextDrafts: LocalEventDraft[]) {
+  if (!nextDrafts.length) return;
+  const draftIds = new Set(nextDrafts.map((draft) => draft.draft_id));
+  const drafts = readLocalEventDrafts().filter((item) => !draftIds.has(item.draft_id));
+  window.localStorage.setItem(localEventDraftsKey, JSON.stringify([...nextDrafts, ...drafts]));
   window.dispatchEvent(new Event(localDraftsChangedEvent));
 }
 
@@ -66,14 +91,51 @@ export function saveLocalCompanyDraft(draft: LocalCompanyDraft) {
 }
 
 export function saveLocalEventUpdate(draft: LocalEventUpdateDraft) {
-  const drafts = readLocalEventUpdates().filter((item) => item.event_id !== draft.event_id);
-  window.localStorage.setItem(localEventUpdatesKey, JSON.stringify([draft, ...drafts]));
+  saveLocalEventUpdates([draft]);
+}
+
+export function saveLocalEventUpdates(nextDrafts: LocalEventUpdateDraft[]) {
+  if (!nextDrafts.length) return;
+  const eventIds = new Set(nextDrafts.map((draft) => draft.event_id));
+  const drafts = readLocalEventUpdates().filter((item) => !eventIds.has(item.event_id));
+  window.localStorage.setItem(localEventUpdatesKey, JSON.stringify([...nextDrafts, ...drafts]));
   window.dispatchEvent(new Event(localDraftsChangedEvent));
 }
 
 export function saveLocalCompanyUpdate(draft: LocalCompanyUpdateDraft) {
   const drafts = readLocalCompanyUpdates().filter((item) => item.company_id !== draft.company_id);
   window.localStorage.setItem(localCompanyUpdatesKey, JSON.stringify([draft, ...drafts]));
+  window.dispatchEvent(new Event(localDraftsChangedEvent));
+}
+
+export function saveLocalEventDelete(draft: LocalEventDeleteDraft) {
+  saveLocalEventDeletes([draft]);
+}
+
+export function saveLocalEventDeletes(drafts: LocalEventDeleteDraft[]) {
+  if (!drafts.length) return;
+  const draftIds = new Set(drafts.map((draft) => draft.event_id));
+  const currentEventDrafts = readLocalEventDrafts();
+  const removedLocalDraftIds = new Set(currentEventDrafts.filter((item) => draftIds.has(item.draft_id)).map((item) => item.draft_id));
+  const eventDrafts = currentEventDrafts.filter((item) => !draftIds.has(item.draft_id));
+  const eventUpdates = readLocalEventUpdates().filter((item) => !draftIds.has(item.event_id));
+  const deletes = readLocalEventDeletes().filter((item) => !draftIds.has(item.event_id));
+  const queuedDeletes = drafts.filter((draft) => !removedLocalDraftIds.has(draft.event_id));
+  window.localStorage.setItem(localEventDraftsKey, JSON.stringify(eventDrafts));
+  window.localStorage.setItem(localEventUpdatesKey, JSON.stringify(eventUpdates));
+  window.localStorage.setItem(localEventDeletesKey, JSON.stringify([...queuedDeletes, ...deletes]));
+  window.dispatchEvent(new Event(localDraftsChangedEvent));
+}
+
+export function saveLocalCompanyDelete(draft: LocalCompanyDeleteDraft) {
+  const currentCompanyDrafts = readLocalCompanyDrafts();
+  const removedLocalDraft = currentCompanyDrafts.some((item) => item.company_id === draft.company_id);
+  const companyDrafts = currentCompanyDrafts.filter((item) => item.company_id !== draft.company_id);
+  const companyUpdates = readLocalCompanyUpdates().filter((item) => item.company_id !== draft.company_id);
+  const deletes = readLocalCompanyDeletes().filter((item) => item.company_id !== draft.company_id);
+  window.localStorage.setItem(localCompanyDraftsKey, JSON.stringify(companyDrafts));
+  window.localStorage.setItem(localCompanyUpdatesKey, JSON.stringify(companyUpdates));
+  window.localStorage.setItem(localCompanyDeletesKey, JSON.stringify(removedLocalDraft ? deletes : [draft, ...deletes]));
   window.dispatchEvent(new Event(localDraftsChangedEvent));
 }
 
@@ -91,6 +153,14 @@ export function useLocalEventUpdates() {
 
 export function useLocalCompanyUpdates() {
   return useLocalDraftList(readLocalCompanyUpdates);
+}
+
+export function useLocalEventDeletes() {
+  return useLocalDraftList(readLocalEventDeletes);
+}
+
+export function useLocalCompanyDeletes() {
+  return useLocalDraftList(readLocalCompanyDeletes);
 }
 
 function useLocalDraftList<T>(read: () => T[]) {
@@ -118,10 +188,10 @@ export function LocalDraftSyncPanel({ companies }: { companies: SheetRow<Company
   const companyDrafts = useLocalCompanyDrafts();
   const eventUpdates = useLocalEventUpdates();
   const companyUpdates = useLocalCompanyUpdates();
-  const searchParams = useSearchParams();
-  const pathname = usePathname();
-  const router = useRouter();
-  const syncedDraft = searchParams.get("syncedDraft");
+  const eventDeletes = useLocalEventDeletes();
+  const companyDeletes = useLocalCompanyDeletes();
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [isSyncing, startSync] = useTransition();
   const companyNames = useMemo(
     () => new Map([
       ...companies.map((company) => [company.company_id, company.company_name] as const),
@@ -129,27 +199,47 @@ export function LocalDraftSyncPanel({ companies }: { companies: SheetRow<Company
     ]),
     [companies, companyDrafts]
   );
-  const totalDrafts = eventDrafts.length + companyDrafts.length + eventUpdates.length + companyUpdates.length;
+  const pendingEventDrafts = eventDrafts.filter((draft) => !draft.synced_at);
+  const pendingCompanyDrafts = companyDrafts.filter((draft) => !draft.synced_at);
+  const pendingEventUpdates = eventUpdates.filter((draft) => !draft.synced_at);
+  const pendingCompanyUpdates = companyUpdates.filter((draft) => !draft.synced_at);
+  const pendingEventDeletes = eventDeletes.filter((draft) => !draft.synced_at);
+  const pendingCompanyDeletes = companyDeletes.filter((draft) => !draft.synced_at);
+  const totalDrafts = pendingEventDrafts.length + pendingCompanyDrafts.length + pendingEventUpdates.length + pendingCompanyUpdates.length + pendingEventDeletes.length + pendingCompanyDeletes.length;
 
-  useEffect(() => {
-    if (!syncedDraft) return;
-    if (syncedDraft === "all") {
-      window.localStorage.removeItem(localEventDraftsKey);
-      window.localStorage.removeItem(localCompanyDraftsKey);
-      window.localStorage.removeItem(localEventUpdatesKey);
-      window.localStorage.removeItem(localCompanyUpdatesKey);
-      window.dispatchEvent(new Event(localDraftsChangedEvent));
-    } else {
-      removeLocalEventDraft(syncedDraft);
-      removeLocalCompanyDraft(syncedDraft);
-      removeLocalEventUpdate(syncedDraft);
-      removeLocalCompanyUpdate(syncedDraft);
-    }
-    const next = new URLSearchParams(searchParams.toString());
-    next.delete("syncedDraft");
-    const suffix = next.toString();
-    router.replace(suffix ? `${pathname}?${suffix}` : pathname);
-  }, [pathname, router, searchParams, syncedDraft]);
+  function sync(
+    nextCompanyDrafts = pendingCompanyDrafts,
+    nextEventDrafts = pendingEventDrafts,
+    nextCompanyUpdates = pendingCompanyUpdates,
+    nextEventUpdates = pendingEventUpdates,
+    nextCompanyDeletes = pendingCompanyDeletes,
+    nextEventDeletes = pendingEventDeletes
+  ) {
+    if (isSyncing) return;
+    setSyncError(null);
+
+    startSync(async () => {
+      const response = await fetch("/api/local-drafts/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companies: nextCompanyDrafts,
+          events: nextEventDrafts,
+          companyUpdates: nextCompanyUpdates,
+          eventUpdates: nextEventUpdates,
+          companyDeletes: nextCompanyDeletes,
+          eventDeletes: nextEventDeletes
+        })
+      });
+      const result = await response.json() as { ok: true } | { ok: false; error: string };
+      if (!result.ok) {
+        setSyncError(result.error);
+        return;
+      }
+
+      markDraftsSynced(nextCompanyDrafts, nextEventDrafts, nextCompanyUpdates, nextEventUpdates, nextCompanyDeletes, nextEventDeletes);
+    });
+  }
 
   if (!totalDrafts) {
     return null;
@@ -170,6 +260,8 @@ export function LocalDraftSyncPanel({ companies }: { companies: SheetRow<Company
             window.localStorage.removeItem(localCompanyDraftsKey);
             window.localStorage.removeItem(localEventUpdatesKey);
             window.localStorage.removeItem(localCompanyUpdatesKey);
+            window.localStorage.removeItem(localEventDeletesKey);
+            window.localStorage.removeItem(localCompanyDeletesKey);
             window.dispatchEvent(new Event(localDraftsChangedEvent));
           }}
           className="rounded-lg px-2 py-1 text-xs font-bold text-amber-800 hover:bg-amber-100"
@@ -178,47 +270,40 @@ export function LocalDraftSyncPanel({ companies }: { companies: SheetRow<Company
         </button>
       </div>
       <div className="mt-3 grid gap-2 border-t border-amber-200 pt-3">
-        <form action={syncLocalDrafts} onSubmit={() => clearSyncedDraftsSoon("all")}>
-          <input type="hidden" name="returnTo" value={returnToWithSyncedDraft(pathname, searchParams, "all")} />
-          <input type="hidden" name="companies_json" value={JSON.stringify(companyDrafts)} />
-          <input type="hidden" name="events_json" value={JSON.stringify(eventDrafts)} />
-          <input type="hidden" name="company_updates_json" value={JSON.stringify(companyUpdates)} />
-          <input type="hidden" name="event_updates_json" value={JSON.stringify(eventUpdates)} />
-          <Button tone="primary" className="w-full">まとめて同期</Button>
-        </form>
+        <button
+          type="button"
+          className="inline-flex h-9 w-full items-center justify-center rounded-lg border border-brand bg-brand px-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+          onClick={() => sync()}
+          disabled={isSyncing}
+        >
+          {isSyncing ? "同期中..." : "まとめて同期"}
+        </button>
         <span className="inline-flex h-8 items-center rounded-lg bg-white px-3 text-xs font-bold text-amber-800">
-          新規 {companyDrafts.length + eventDrafts.length} / 編集 {companyUpdates.length + eventUpdates.length}
+          新規 {pendingCompanyDrafts.length + pendingEventDrafts.length} / 編集 {pendingCompanyUpdates.length + pendingEventUpdates.length} / 削除 {pendingCompanyDeletes.length + pendingEventDeletes.length}
         </span>
+        {syncError ? <p className="text-xs font-semibold text-red-700">{syncError}</p> : null}
       </div>
       <div className="mt-3 grid min-h-0 gap-2 overflow-y-auto pr-1">
-        {companyDrafts.slice(0, 4).map((draft) => (
-          <form
+        {pendingCompanyDrafts.slice(0, 4).map((draft) => (
+          <div
             key={draft.draft_id}
-            action={syncLocalCompany}
-            onSubmit={() => clearSyncedDraftsSoon(draft.draft_id)}
             className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-amber-200 bg-white p-2"
           >
-            <input type="hidden" name="returnTo" value={returnToWithSyncedDraft(pathname, searchParams, draft.draft_id)} />
-            <CompanyDraftHiddenInputs draft={draft} />
             <div className="min-w-0">
               <p className="truncate text-sm font-bold text-ink">{draft.company_name || "企業名未設定"}</p>
               <p className="truncate text-xs font-semibold text-muted">企業追加 / 未同期</p>
             </div>
-            <Button tone="primary">同期</Button>
-          </form>
+            <button type="button" onClick={() => sync([draft], [], [], [], [], [])} disabled={isSyncing} className="inline-flex h-9 items-center justify-center rounded-lg border border-brand bg-brand px-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">同期</button>
+          </div>
         ))}
-        {eventDrafts.slice(0, Math.max(0, 4 - companyDrafts.length)).map((draft) => {
-          const waitsForCompany = companyDrafts.some((company) => company.company_id === draft.company_id);
+        {pendingEventDrafts.slice(0, Math.max(0, 4 - pendingCompanyDrafts.length)).map((draft) => {
+          const waitsForCompany = pendingCompanyDrafts.some((company) => company.company_id === draft.company_id);
 
           return (
-            <form
+            <div
               key={draft.draft_id}
-              action={createEvent}
-              onSubmit={() => clearSyncedDraftsSoon(draft.draft_id)}
               className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-amber-200 bg-white p-2"
             >
-              <input type="hidden" name="returnTo" value={returnToWithSyncedDraft(pathname, searchParams, draft.draft_id)} />
-              <EventDraftHiddenInputs draft={draft} />
               <div className="min-w-0">
                 <p className="truncate text-sm font-bold text-ink">
                   {draft.event_type || "予定"} / {companyNames.get(draft.company_id) ?? "企業未設定"}
@@ -227,11 +312,11 @@ export function LocalDraftSyncPanel({ companies }: { companies: SheetRow<Company
                   {waitsForCompany ? "先に企業を同期してください" : draft.start_datetime || "日付未設定"}
                 </p>
               </div>
-              <Button tone="primary" disabled={waitsForCompany}>同期</Button>
-            </form>
+              <button type="button" onClick={() => sync([], [draft], [], [], [], [])} disabled={waitsForCompany || isSyncing} className="inline-flex h-9 items-center justify-center rounded-lg border border-brand bg-brand px-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400">同期</button>
+            </div>
           );
         })}
-        {companyUpdates.slice(0, 4).map((draft) => (
+        {pendingCompanyUpdates.slice(0, 4).map((draft) => (
           <div key={`company-update-${draft.company_id}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-amber-200 bg-white p-2">
             <div className="min-w-0">
               <p className="truncate text-sm font-bold text-ink">{draft.company_name || "企業名未設定"}</p>
@@ -240,7 +325,7 @@ export function LocalDraftSyncPanel({ companies }: { companies: SheetRow<Company
             <span className="text-xs font-bold text-amber-800">待機中</span>
           </div>
         ))}
-        {eventUpdates.slice(0, 4).map((draft) => (
+        {pendingEventUpdates.slice(0, 4).map((draft) => (
           <div key={`event-update-${draft.event_id}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-amber-200 bg-white p-2">
             <div className="min-w-0">
               <p className="truncate text-sm font-bold text-ink">{draft.event_type || "予定"} / {companyNames.get(draft.company_id) ?? "企業未設定"}</p>
@@ -249,43 +334,26 @@ export function LocalDraftSyncPanel({ companies }: { companies: SheetRow<Company
             <span className="text-xs font-bold text-amber-800">待機中</span>
           </div>
         ))}
+        {pendingCompanyDeletes.slice(0, 4).map((draft) => (
+          <div key={`company-delete-${draft.company_id}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-amber-200 bg-white p-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-ink">{draft.label || "企業"}</p>
+              <p className="truncate text-xs font-semibold text-muted">企業削除 / 未同期</p>
+            </div>
+            <span className="text-xs font-bold text-amber-800">待機中</span>
+          </div>
+        ))}
+        {pendingEventDeletes.slice(0, 4).map((draft) => (
+          <div key={`event-delete-${draft.event_id}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-xl border border-amber-200 bg-white p-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-ink">{draft.label || "予定"}</p>
+              <p className="truncate text-xs font-semibold text-muted">予定削除 / 未同期</p>
+            </div>
+            <span className="text-xs font-bold text-amber-800">待機中</span>
+          </div>
+        ))}
       </div>
     </aside>
-    </>
-  );
-}
-
-function CompanyDraftHiddenInputs({ draft }: { draft: LocalCompanyDraft }) {
-  return (
-    <>
-      <input type="hidden" name="company_id" value={draft.company_id} />
-      <input type="hidden" name="company_name" value={draft.company_name} />
-      <input type="hidden" name="industry" value={draft.industry} />
-      <input type="hidden" name="status" value={draft.status} />
-      <input type="hidden" name="mypage_url" value={draft.mypage_url} />
-      <input type="hidden" name="memo" value={draft.memo} />
-      <input type="hidden" name="application_source" value={draft.application_source} />
-    </>
-  );
-}
-
-function EventDraftHiddenInputs({ draft }: { draft: LocalEventDraft }) {
-  return (
-    <>
-      <input type="hidden" name="company_id" value={draft.company_id} />
-      <input type="hidden" name="selection_type" value={draft.selection_type} />
-      <input type="hidden" name="event_type" value={draft.event_type} />
-      <input type="hidden" name="title" value={draft.title} />
-      <input type="hidden" name="start_datetime" value={draft.start_datetime} />
-      <input type="hidden" name="end_datetime" value={draft.end_datetime} />
-      <input type="hidden" name="timezone" value={draft.timezone} />
-      <input type="hidden" name="is_period" value={draft.is_period} />
-      <input type="hidden" name="period_end_date" value={draft.period_end_date} />
-      <input type="hidden" name="status" value={draft.status} />
-      <input type="hidden" name="person" value={draft.person} />
-      <input type="hidden" name="meeting_url" value={draft.meeting_url} />
-      <input type="hidden" name="memo" value={draft.memo} />
-      <input type="hidden" name="sync_to_calendar" value={draft.sync_to_calendar} />
     </>
   );
 }
@@ -334,53 +402,93 @@ function readLocalCompanyUpdates() {
   }
 }
 
-function removeLocalEventDraft(draftId: string) {
-  const next = readLocalEventDrafts().filter((draft) => draft.draft_id !== draftId);
-  window.localStorage.setItem(localEventDraftsKey, JSON.stringify(next));
-  window.dispatchEvent(new Event(localDraftsChangedEvent));
+function readLocalEventDeletes() {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(localEventDeletesKey) ?? "[]");
+    return Array.isArray(parsed) ? uniqueBy(parsed.filter(isLocalEventDeleteDraft), (draft) => draft.event_id) : [];
+  } catch {
+    return [];
+  }
 }
 
-function removeLocalCompanyDraft(draftId: string) {
-  const next = readLocalCompanyDrafts().filter((draft) => draft.draft_id !== draftId);
-  window.localStorage.setItem(localCompanyDraftsKey, JSON.stringify(next));
-  window.dispatchEvent(new Event(localDraftsChangedEvent));
+function readLocalCompanyDeletes() {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(localCompanyDeletesKey) ?? "[]");
+    return Array.isArray(parsed) ? uniqueBy(parsed.filter(isLocalCompanyDeleteDraft), (draft) => draft.company_id) : [];
+  } catch {
+    return [];
+  }
 }
 
-function removeLocalEventUpdate(draftId: string) {
-  const next = readLocalEventUpdates().filter((draft) => draft.event_id !== draftId);
-  window.localStorage.setItem(localEventUpdatesKey, JSON.stringify(next));
-  window.dispatchEvent(new Event(localDraftsChangedEvent));
-}
+function markDraftsSynced(
+  companyDrafts: LocalCompanyDraft[],
+  eventDrafts: LocalEventDraft[],
+  companyUpdates: LocalCompanyUpdateDraft[],
+  eventUpdates: LocalEventUpdateDraft[],
+  companyDeletes: LocalCompanyDeleteDraft[],
+  eventDeletes: LocalEventDeleteDraft[]
+) {
+  const syncedAt = new Date().toISOString();
+  const companyDraftIds = new Set(companyDrafts.map((draft) => draft.draft_id));
+  const eventDraftIds = new Set(eventDrafts.map((draft) => draft.draft_id));
+  const companyUpdateIds = new Set(companyUpdates.map((draft) => draft.company_id));
+  const eventUpdateIds = new Set(eventUpdates.map((draft) => draft.event_id));
+  const companyDeleteIds = new Set(companyDeletes.map((draft) => draft.company_id));
+  const eventDeleteIds = new Set(eventDeletes.map((draft) => draft.event_id));
 
-function removeLocalCompanyUpdate(draftId: string) {
-  const next = readLocalCompanyUpdates().filter((draft) => draft.company_id !== draftId);
-  window.localStorage.setItem(localCompanyUpdatesKey, JSON.stringify(next));
-  window.dispatchEvent(new Event(localDraftsChangedEvent));
-}
+  if (companyDraftIds.size) {
+    window.localStorage.setItem(
+      localCompanyDraftsKey,
+      JSON.stringify(readLocalCompanyDrafts().map((draft) => companyDraftIds.has(draft.draft_id) ? { ...draft, synced_at: syncedAt } : draft))
+    );
+  }
+  if (eventDraftIds.size) {
+    window.localStorage.setItem(
+      localEventDraftsKey,
+      JSON.stringify(readLocalEventDrafts().map((draft) => eventDraftIds.has(draft.draft_id) ? { ...draft, synced_at: syncedAt } : draft))
+    );
+  }
+  if (companyUpdateIds.size) {
+    window.localStorage.setItem(
+      localCompanyUpdatesKey,
+      JSON.stringify(readLocalCompanyUpdates().map((draft) => companyUpdateIds.has(draft.company_id) ? { ...draft, synced_at: syncedAt } : draft))
+    );
+  }
+  if (eventUpdateIds.size) {
+    window.localStorage.setItem(
+      localEventUpdatesKey,
+      JSON.stringify(readLocalEventUpdates().map((draft) => eventUpdateIds.has(draft.event_id) ? { ...draft, synced_at: syncedAt } : draft))
+    );
+  }
+  if (companyDeleteIds.size) {
+    window.localStorage.setItem(
+      localCompanyDeletesKey,
+      JSON.stringify(readLocalCompanyDeletes().map((draft) => companyDeleteIds.has(draft.company_id) ? { ...draft, synced_at: syncedAt } : draft))
+    );
+  }
+  if (eventDeleteIds.size) {
+    window.localStorage.setItem(
+      localEventDeletesKey,
+      JSON.stringify(readLocalEventDeletes().map((draft) => eventDeleteIds.has(draft.event_id) ? { ...draft, synced_at: syncedAt } : draft))
+    );
+  }
 
-function clearSyncedDraftsSoon(draftId: string) {
-  window.setTimeout(() => {
-    if (draftId === "all") {
-      window.localStorage.removeItem(localEventDraftsKey);
-      window.localStorage.removeItem(localCompanyDraftsKey);
-      window.localStorage.removeItem(localEventUpdatesKey);
-      window.localStorage.removeItem(localCompanyUpdatesKey);
-      window.dispatchEvent(new Event(localDraftsChangedEvent));
-      return;
+  window.dispatchEvent(new CustomEvent(localDraftsSyncedEvent, {
+    detail: {
+      companyDrafts,
+      eventDrafts,
+      companyUpdates,
+      eventUpdates,
+      companyDeletes,
+      eventDeletes,
+      syncedAt
     }
-
-    removeLocalEventDraft(draftId);
-    removeLocalCompanyDraft(draftId);
-    removeLocalEventUpdate(draftId);
-    removeLocalCompanyUpdate(draftId);
-  }, 500);
-}
-
-function returnToWithSyncedDraft(pathname: string, searchParams: URLSearchParams, draftId: string) {
-  const next = new URLSearchParams(searchParams.toString());
-  next.set("syncedDraft", draftId);
-  const suffix = next.toString();
-  return suffix ? `${pathname}?${suffix}` : pathname;
+  }));
+  window.dispatchEvent(new Event(localDraftsChangedEvent));
 }
 
 function isLocalEventDraft(value: unknown): value is LocalEventDraft {
@@ -400,6 +508,16 @@ function isLocalEventUpdateDraft(value: unknown): value is LocalEventUpdateDraft
 
 function isLocalCompanyUpdateDraft(value: unknown): value is LocalCompanyUpdateDraft {
   if (!isLocalCompanyDraft(value)) return false;
+  return "company_id" in value && typeof value.company_id === "string";
+}
+
+function isLocalEventDeleteDraft(value: unknown): value is LocalEventDeleteDraft {
+  if (!value || typeof value !== "object") return false;
+  return "event_id" in value && typeof value.event_id === "string";
+}
+
+function isLocalCompanyDeleteDraft(value: unknown): value is LocalCompanyDeleteDraft {
+  if (!value || typeof value !== "object") return false;
   return "company_id" in value && typeof value.company_id === "string";
 }
 

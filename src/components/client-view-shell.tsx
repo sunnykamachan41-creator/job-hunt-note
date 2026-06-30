@@ -31,7 +31,7 @@ export function ClientViewShell({
   const [activeView, setActiveView] = useState<ClientAppView>(initialView);
   const [mountedViews, setMountedViews] = useState<Set<ClientAppView>>(() => new Set([initialView]));
   const navKey = viewToNavKey(activeView);
-  const fitScreen = activeView === "dashboard" || activeView === "calendar";
+  const fitScreen = activeView === "dashboard" || activeView === "calendar" || activeView === "stats";
   const addLinks = useMemo(
     () => [
       { label: "企業を追加", mode: "company" as const },
@@ -69,7 +69,7 @@ export function ClientViewShell({
       addLinks={addLinks}
     >
       <div className={`grid min-w-0 max-w-full ${
-        activeView === "dashboard"
+      activeView === "dashboard" || activeView === "stats"
           ? "h-full grid-rows-[minmax(0,1fr)] gap-3 overflow-hidden"
           : activeView === "calendar"
             ? "h-full overflow-hidden"

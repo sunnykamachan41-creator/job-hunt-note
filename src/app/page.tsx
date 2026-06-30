@@ -17,6 +17,7 @@ type HomeProps = {
   searchParams?: Promise<{
     actionError?: string;
     view?: string;
+    company?: string;
     month?: string;
     _refresh?: string;
   }>;
@@ -54,6 +55,7 @@ export default async function Home({ searchParams }: HomeProps) {
       error={error}
       actionError={params?.actionError}
       monthParam={params?.month}
+      initialCompanyId={params?.company}
     />
   );
 }

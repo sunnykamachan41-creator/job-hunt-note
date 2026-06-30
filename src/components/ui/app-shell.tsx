@@ -37,7 +37,7 @@ export function AppShell({
   onNavigate?: (key: NavKey) => void;
   addLinks?: { href?: string; label: string; mode?: AddMode }[];
 }) {
-  const fitScreen = active === "dashboard" || active === "calendar";
+  const fitScreen = active === "dashboard" || active === "calendar" || active === "analytics";
   const desktopRightMargin = rightPanel ? rightPanelOffsetClass : "";
 
   return (

@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { openEditTarget } from "@/components/edit-entity-actions";
+import { saveLocalEventDelete } from "@/components/local-draft-sync-panel";
 import type { SheetRow } from "@/lib/google-sheets";
-import { deleteEventFromHome } from "@/lib/home-actions";
 import { eventKindLabel, eventScheduleRangeLabel } from "@/lib/planning";
 import type { Company } from "@/types/company";
 import type { JobEvent } from "@/types/event";
@@ -37,6 +37,7 @@ export function TimelineEventOpenButton({
       title={title}
       aria-label={ariaLabel ?? title}
       onClick={(clickEvent) => {
+        clickEvent.stopPropagation();
         const rect = clickEvent.currentTarget.getBoundingClientRect();
         window.dispatchEvent(new CustomEvent(openTimelineEventName, {
           detail: {
@@ -119,16 +120,20 @@ export function TimelineEventPopoverLayer({
             >
               編集
             </button>
-            <form action={deleteEventFromHome}>
-              <input type="hidden" name="returnTo" value="/" />
-              <input type="hidden" name="event_id" value={event.event_id} />
-              <button
-                type="submit"
-                className="rounded-lg px-2 py-1 text-base font-semibold text-red-600 hover:bg-red-50"
-              >
-                削除
-              </button>
-            </form>
+            <button
+              type="button"
+              onClick={() => {
+                saveLocalEventDelete({
+                  event_id: event.event_id,
+                  label: event.title || event.event_type || "予定",
+                  created_at: new Date().toISOString()
+                });
+                setState(null);
+              }}
+              className="rounded-lg px-2 py-1 text-base font-semibold text-red-600 hover:bg-red-50"
+            >
+              削除
+            </button>
             <button
               type="button"
               onClick={() => setState(null)}
